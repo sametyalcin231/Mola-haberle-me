@@ -77,7 +77,7 @@ if st.session_state.get("login_time"):
 # --- Personel Paneli ---
 if st.session_state.get("role") == "Personel":
     st.title("👤 Personel Paneli")
-    tab1, tab2 = st.tabs(["Durum Güncelle", "En Son Dışarıda Olanlar"])
+    tab1, tab2 = st.tabs(["Durum Güncelle", "Şu An Dışarıda Olanlar"])
 
     with tab1:
         durum = st.selectbox("Durumunuz", ["İçeriye Gir", "Dışarıya Çık"])
@@ -105,16 +105,15 @@ if st.session_state.get("role") == "Personel":
         # sayfayı her 10 saniyede bir yenile
         st_autorefresh(interval=10000, key="refresh")
 
-        # her personelin sadece en son çıkışı
+        # sadece şu anda dışarıda olanlar (cikis IS NULL)
         disaridaki = pd.read_sql("""
-            SELECT username, MAX(cikis) as son_cikis
+            SELECT username, giris
             FROM logs
-            WHERE durum='Dışarıda'
-            GROUP BY username
+            WHERE durum='Dışarıda' AND cikis IS NULL
         """, conn)
         if not disaridaki.empty:
             for _, row in disaridaki.iterrows():
-                st.info(f"🚶 {row['username']} en son dışarıda ({row['son_cikis']})")
+                st.info(f"🚶 {row['username']} şu anda dışarıda (giriş: {row['giris']})")
         else:
             st.success("Şu anda kimse dışarıda değil.")
 
@@ -129,13 +128,13 @@ elif st.session_state.get("role") == "Yönetici":
         with tab1:
             toplam = df["username"].nunique()
             icerde = df[(df["durum"]=="İçeride") & (df["cikis"].isnull())]["username"].nunique()
-            disarda = df[(df["durum"]=="Dışarıda")]["username"].nunique()
+            disarda = df[(df["durum"]=="Dışarıda") & (df["cikis"].isnull())]["username"].nunique()
             ort_sure = df["sure"].dropna().mean()
 
             col1, col2, col3, col4 = st.columns(4)
             col1.metric("Toplam Personel", toplam)
             col2.metric("İçeride", icerde)
-            col3.metric("Dışarıda", disarda)
+            col3.metric("Dışarıda (aktif)", disarda)
             col4.metric("Ortalama Süre (dk)", round(ort_sure,1) if not pd.isna(ort_sure) else 0)
 
         with tab2:
