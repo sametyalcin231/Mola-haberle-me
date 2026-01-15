@@ -4,6 +4,10 @@ import sqlite3
 import io
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh
+import pytz
+
+# --- Timezone (Türkiye) ---
+tz = pytz.timezone("Europe/Istanbul")
 
 # --- Veritabanı Bağlantısı ---
 conn = sqlite3.connect("personel.db", check_same_thread=False)
@@ -63,14 +67,14 @@ if login_btn:
     if user:
         st.session_state.role = user[2]
         st.session_state.user = user[0]
-        st.session_state.login_time = datetime.now()
+        st.session_state.login_time = datetime.now(tz)
         st.sidebar.success("Giriş başarılı ✅")
     else:
         st.sidebar.error("Hatalı kullanıcı adı veya şifre ❌")
 
 # Bildirim
 if st.session_state.get("login_time"):
-    elapsed = datetime.now() - st.session_state.login_time
+    elapsed = datetime.now(tz) - st.session_state.login_time
     if elapsed > timedelta(minutes=15):
         st.sidebar.warning("⏰ 15 dakika oldu, lütfen kontrol edin!")
 
@@ -83,37 +87,28 @@ if st.session_state.get("role") == "Personel":
         durum = st.selectbox("Durumunuz", ["İçeriye Gir", "Dışarıya Çık"])
         if st.button("Kaydet"):
             if durum == "İçeriye Gir":
-                # İçeriye giriş logu
                 c.execute("INSERT INTO logs (username, durum, giris, cikis, sure) VALUES (?, ?, ?, ?, ?)", 
-                          (st.session_state.user, "İçeride", datetime.now().strftime("%Y-%m-%d %H:%M:%S"), None, None))
+                          (st.session_state.user, "İçeride", datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S"), None, None))
             else:
-                # Dışarı çıkış logu anında yazılsın
-                giris = c.execute("SELECT giris FROM logs WHERE username=? AND cikis IS NULL", (st.session_state.user,)).fetchone()
-                if giris:
-                    giris_time = datetime.strptime(giris[0], "%Y-%m-%d %H:%M:%S")
-                    cikis_time = datetime.now()
-                    sure = int((cikis_time - giris_time).total_seconds() / 60)
-                    c.execute("UPDATE logs SET durum=?, cikis=?, sure=? WHERE username=? AND cikis IS NULL",
-                              ("Dışarıda", cikis_time.strftime("%Y-%m-%d %H:%M:%S"), sure, st.session_state.user))
-                else:
-                    # Eğer giriş kaydı yoksa direkt dışarı logu aç
-                    c.execute("INSERT INTO logs (username, durum, giris, cikis, sure) VALUES (?, ?, ?, ?, ?)",
-                              (st.session_state.user, "Dışarıda", None, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 0))
+                c.execute("INSERT INTO logs (username, durum, giris, cikis, sure) VALUES (?, ?, ?, ?, ?)", 
+                          (st.session_state.user, "Dışarıda", None, datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S"), None))
             conn.commit()
+            st.success("Durumunuz güncellendi ✅")
 
     with tab2:
-        # sayfayı her 10 saniyede bir yenile
         st_autorefresh(interval=10000, key="refresh")
 
-        # sadece şu anda dışarıda olanlar (cikis IS NULL)
+        # sadece şu anda dışarıda olanlar
         disaridaki = pd.read_sql("""
-            SELECT username, giris
+            SELECT username, cikis
             FROM logs
-            WHERE durum='Dışarıda' AND cikis IS NULL
+            WHERE durum='Dışarıda'
+            ORDER BY cikis DESC
         """, conn)
+
         if not disaridaki.empty:
             for _, row in disaridaki.iterrows():
-                st.info(f"🚶 {row['username']} şu anda dışarıda (giriş: {row['giris']})")
+                st.info(f"🚶 {row['username']} şu anda dışarıda (çıkış: {row['cikis']})")
         else:
             st.success("Şu anda kimse dışarıda değil.")
 
@@ -127,8 +122,8 @@ elif st.session_state.get("role") == "Yönetici":
 
         with tab1:
             toplam = df["username"].nunique()
-            icerde = df[(df["durum"]=="İçeride") & (df["cikis"].isnull())]["username"].nunique()
-            disarda = df[(df["durum"]=="Dışarıda") & (df["cikis"].isnull())]["username"].nunique()
+            icerde = df[(df["durum"]=="İçeride")]["username"].nunique()
+            disarda = df[(df["durum"]=="Dışarıda")]["username"].nunique()
             ort_sure = df["sure"].dropna().mean()
 
             col1, col2, col3, col4 = st.columns(4)
@@ -140,7 +135,6 @@ elif st.session_state.get("role") == "Yönetici":
         with tab2:
             st.dataframe(df, use_container_width=True)
 
-            # Excel export fix
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine="openpyxl") as writer:
                 df.to_excel(writer, index=False, sheet_name="Logs")
