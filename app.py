@@ -3,6 +3,7 @@ import pandas as pd
 import sqlite3
 import io
 from datetime import datetime, timedelta
+from streamlit_autorefresh import st_autorefresh
 
 # --- Veritabanı Bağlantısı ---
 conn = sqlite3.connect("personel.db", check_same_thread=False)
@@ -98,9 +99,11 @@ if st.session_state.get("role") == "Personel":
                     c.execute("INSERT INTO logs VALUES (?, ?, ?, ?)",
                               (st.session_state.user, None, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 0))
             conn.commit()
-            st.experimental_rerun()  # aktif güncelleme
 
     with tab2:
+        # sayfayı her 10 saniyede bir yenile
+        st_autorefresh(interval=10000, key="refresh")
+
         # her personelin sadece en son çıkışı
         disaridaki = pd.read_sql("""
             SELECT username, MAX(cikis) as son_cikis
