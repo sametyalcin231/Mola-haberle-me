@@ -15,7 +15,8 @@ c = conn.cursor()
 c.execute("""CREATE TABLE IF NOT EXISTS users (
     username TEXT PRIMARY KEY,
     password TEXT,
-    role TEXT
+    role TEXT,
+    approved INTEGER
 )""")
 c.execute("""CREATE TABLE IF NOT EXISTS logs (
     username TEXT,
@@ -27,7 +28,7 @@ c.execute("""CREATE TABLE IF NOT EXISTS logs (
 conn.commit()
 
 # --- Admin hesabını otomatik ekle ---
-c.execute("INSERT OR IGNORE INTO users VALUES (?, ?, ?)", ("admin", "1234", "Yönetici"))
+c.execute("INSERT OR IGNORE INTO users VALUES (?, ?, ?, ?)", ("admin", "1234", "Yönetici", 1))
 conn.commit()
 
 # --- Sidebar Düzeni ---
@@ -45,9 +46,9 @@ new_user = st.sidebar.text_input("Yeni Kullanıcı Adı")
 new_pass = st.sidebar.text_input("Yeni Şifre", type="password")
 if st.sidebar.button("Kayıt Ol"):
     try:
-        c.execute("INSERT INTO users VALUES (?, ?, ?)", (new_user, new_pass, "Personel"))
+        c.execute("INSERT INTO users VALUES (?, ?, ?, ?)", (new_user, new_pass, "Personel", 0))
         conn.commit()
-        st.sidebar.success("Kullanıcı oluşturuldu ✅")
+        st.sidebar.success("Kullanıcı oluşturuldu ✅ (Admin onayı bekleniyor)")
     except:
         st.sidebar.error("Bu kullanıcı adı zaten mevcut ❌")
 
@@ -65,10 +66,13 @@ if "login_time" not in st.session_state:
 if login_btn:
     user = c.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password)).fetchone()
     if user:
-        st.session_state.role = user[2]
-        st.session_state.user = user[0]
-        st.session_state.login_time = datetime.now(tz)
-        st.sidebar.success("Giriş başarılı ✅")
+        if user[3] == 1:  # approved
+            st.session_state.role = user[2]
+            st.session_state.user = user[0]
+            st.session_state.login_time = datetime.now(tz)
+            st.sidebar.success("Giriş başarılı ✅")
+        else:
+            st.sidebar.error("Hesabınız henüz admin tarafından onaylanmadı ❌")
     else:
         st.sidebar.error("Hatalı kullanıcı adı veya şifre ❌")
 
@@ -81,7 +85,7 @@ if st.session_state.get("login_time"):
 # --- Personel Paneli ---
 if st.session_state.get("role") == "Personel":
     st.title("👤 Personel Paneli")
-    tab1, tab2 = st.tabs(["Durum Güncelle", "Şu An Dışarıda Olanlar"])
+    tab1, tab2, tab3 = st.tabs(["Durum Güncelle", "Şu An Dışarıda Olanlar", "Profilim"])
 
     with tab1:
         durum = st.selectbox("Durumunuz", ["İçeriye Gir", "Dışarıya Çık"])
@@ -97,57 +101,68 @@ if st.session_state.get("role") == "Personel":
 
     with tab2:
         st_autorefresh(interval=10000, key="refresh")
-
-        # sadece şu anda dışarıda olanlar
         disaridaki = pd.read_sql("""
             SELECT username, cikis
             FROM logs
             WHERE durum='Dışarıda'
             ORDER BY cikis DESC
         """, conn)
-
         if not disaridaki.empty:
             for _, row in disaridaki.iterrows():
                 st.info(f"🚶 {row['username']} şu anda dışarıda (çıkış: {row['cikis']})")
         else:
             st.success("Şu anda kimse dışarıda değil.")
 
+    with tab3:
+        profil = pd.read_sql("SELECT * FROM logs WHERE username=?", conn, params=(st.session_state.user,))
+        if not profil.empty:
+            st.dataframe(profil, use_container_width=True)
+        else:
+            st.info("Henüz log kaydınız yok.")
+
 # --- Yönetici Paneli ---
 elif st.session_state.get("role") == "Yönetici":
     st.title("👨‍💼 Yönetici Paneli")
     df = pd.read_sql("SELECT * FROM logs", conn)
 
-    if not df.empty:
-        tab1, tab2 = st.tabs(["Dashboard", "Loglar"])
+    tab1, tab2, tab3 = st.tabs(["Dashboard", "Loglar", "Kullanıcı Onayı"])
 
-        with tab1:
-            toplam = df["username"].nunique()
-            icerde = df[(df["durum"]=="İçeride")]["username"].nunique()
-            disarda = df[(df["durum"]=="Dışarıda")]["username"].nunique()
-            ort_sure = df["sure"].dropna().mean()
+    with tab1:
+        toplam = df["username"].nunique()
+        icerde = df[(df["durum"]=="İçeride")]["username"].nunique()
+        disarda = df[(df["durum"]=="Dışarıda")]["username"].nunique()
+        ort_sure = df["sure"].dropna().mean()
 
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Toplam Personel", toplam)
-            col2.metric("İçeride", icerde)
-            col3.metric("Dışarıda (aktif)", disarda)
-            col4.metric("Ortalama Süre (dk)", round(ort_sure,1) if not pd.isna(ort_sure) else 0)
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Toplam Personel", toplam)
+        col2.metric("İçeride", icerde)
+        col3.metric("Dışarıda (aktif)", disarda)
+        col4.metric("Ortalama Süre (dk)", round(ort_sure,1) if not pd.isna(ort_sure) else 0)
 
-        with tab2:
-            st.dataframe(df, use_container_width=True)
+    with tab2:
+        st.dataframe(df, use_container_width=True)
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="Logs")
+        excel_data = output.getvalue()
+        st.download_button(
+            label="📥 Excel Olarak İndir",
+            data=excel_data,
+            file_name="personel_logs.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                df.to_excel(writer, index=False, sheet_name="Logs")
-            excel_data = output.getvalue()
-
-            st.download_button(
-                label="📥 Excel Olarak İndir",
-                data=excel_data,
-                file_name="personel_logs.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-    else:
-        st.warning("Henüz kayıtlı log yok.")
+    with tab3:
+        pending = pd.read_sql("SELECT username FROM users WHERE approved=0", conn)
+        if not pending.empty:
+            st.warning("Onay bekleyen kullanıcılar:")
+            for _, row in pending.iterrows():
+                if st.button(f"Onayla: {row['username']}"):
+                    c.execute("UPDATE users SET approved=1 WHERE username=?", (row['username'],))
+                    conn.commit()
+                    st.success(f"{row['username']} onaylandı ✅")
+        else:
+            st.success("Onay bekleyen kullanıcı yok.")
 
 # --- Modern UI ---
 st.sidebar.markdown("---")
