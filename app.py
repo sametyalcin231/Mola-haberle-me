@@ -98,7 +98,7 @@ if st.session_state.get("role") == "Personel":
                     c.execute("INSERT INTO logs VALUES (?, ?, ?, ?)",
                               (st.session_state.user, None, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 0))
             conn.commit()
-            st.success("Durumunuz güncellendi ✅")
+            st.experimental_rerun()  # aktif güncelleme
 
     with tab2:
         # her personelin sadece en son çıkışı
