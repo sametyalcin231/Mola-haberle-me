@@ -12,12 +12,16 @@ tz = pytz.timezone("Europe/Istanbul")
 # --- Veritabanı Bağlantısı ---
 conn = sqlite3.connect("personel.db", check_same_thread=False)
 c = conn.cursor()
+
+# Kullanıcı tablosu (admin onayı için approved sütunu eklendi)
 c.execute("""CREATE TABLE IF NOT EXISTS users (
     username TEXT PRIMARY KEY,
     password TEXT,
     role TEXT,
     approved INTEGER
 )""")
+
+# Log tablosu
 c.execute("""CREATE TABLE IF NOT EXISTS logs (
     username TEXT,
     durum TEXT,
@@ -28,7 +32,8 @@ c.execute("""CREATE TABLE IF NOT EXISTS logs (
 conn.commit()
 
 # --- Admin hesabını otomatik ekle ---
-c.execute("INSERT OR IGNORE INTO users VALUES (?, ?, ?, ?)", ("admin", "1234", "Yönetici", 1))
+c.execute("INSERT OR IGNORE INTO users (username, password, role, approved) VALUES (?, ?, ?, ?)",
+          ("admin", "1234", "Yönetici", 1))
 conn.commit()
 
 # --- Sidebar Düzeni ---
@@ -46,7 +51,8 @@ new_user = st.sidebar.text_input("Yeni Kullanıcı Adı")
 new_pass = st.sidebar.text_input("Yeni Şifre", type="password")
 if st.sidebar.button("Kayıt Ol"):
     try:
-        c.execute("INSERT INTO users VALUES (?, ?, ?, ?)", (new_user, new_pass, "Personel", 0))
+        c.execute("INSERT INTO users (username, password, role, approved) VALUES (?, ?, ?, ?)",
+                  (new_user, new_pass, "Personel", 0))
         conn.commit()
         st.sidebar.success("Kullanıcı oluşturuldu ✅ (Admin onayı bekleniyor)")
     except:
