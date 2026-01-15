@@ -15,6 +15,7 @@ c.execute("""CREATE TABLE IF NOT EXISTS users (
 )""")
 c.execute("""CREATE TABLE IF NOT EXISTS logs (
     username TEXT,
+    durum TEXT,
     giris TEXT,
     cikis TEXT,
     sure INTEGER
@@ -83,8 +84,8 @@ if st.session_state.get("role") == "Personel":
         if st.button("Kaydet"):
             if durum == "İçeriye Gir":
                 # İçeriye giriş logu
-                c.execute("INSERT INTO logs VALUES (?, ?, ?, ?)", 
-                          (st.session_state.user, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), None, None))
+                c.execute("INSERT INTO logs (username, durum, giris, cikis, sure) VALUES (?, ?, ?, ?, ?)", 
+                          (st.session_state.user, "İçeride", datetime.now().strftime("%Y-%m-%d %H:%M:%S"), None, None))
             else:
                 # Dışarı çıkış logu anında yazılsın
                 giris = c.execute("SELECT giris FROM logs WHERE username=? AND cikis IS NULL", (st.session_state.user,)).fetchone()
@@ -92,12 +93,12 @@ if st.session_state.get("role") == "Personel":
                     giris_time = datetime.strptime(giris[0], "%Y-%m-%d %H:%M:%S")
                     cikis_time = datetime.now()
                     sure = int((cikis_time - giris_time).total_seconds() / 60)
-                    c.execute("UPDATE logs SET cikis=?, sure=? WHERE username=? AND cikis IS NULL",
-                              (cikis_time.strftime("%Y-%m-%d %H:%M:%S"), sure, st.session_state.user))
+                    c.execute("UPDATE logs SET durum=?, cikis=?, sure=? WHERE username=? AND cikis IS NULL",
+                              ("Dışarıda", cikis_time.strftime("%Y-%m-%d %H:%M:%S"), sure, st.session_state.user))
                 else:
                     # Eğer giriş kaydı yoksa direkt dışarı logu aç
-                    c.execute("INSERT INTO logs VALUES (?, ?, ?, ?)",
-                              (st.session_state.user, None, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 0))
+                    c.execute("INSERT INTO logs (username, durum, giris, cikis, sure) VALUES (?, ?, ?, ?, ?)",
+                              (st.session_state.user, "Dışarıda", None, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 0))
             conn.commit()
 
     with tab2:
@@ -108,7 +109,7 @@ if st.session_state.get("role") == "Personel":
         disaridaki = pd.read_sql("""
             SELECT username, MAX(cikis) as son_cikis
             FROM logs
-            WHERE cikis IS NOT NULL
+            WHERE durum='Dışarıda'
             GROUP BY username
         """, conn)
         if not disaridaki.empty:
@@ -127,13 +128,15 @@ elif st.session_state.get("role") == "Yönetici":
 
         with tab1:
             toplam = df["username"].nunique()
-            aktif = df[df["cikis"].isnull()]["username"].nunique()
+            icerde = df[(df["durum"]=="İçeride") & (df["cikis"].isnull())]["username"].nunique()
+            disarda = df[(df["durum"]=="Dışarıda")]["username"].nunique()
             ort_sure = df["sure"].dropna().mean()
 
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             col1.metric("Toplam Personel", toplam)
-            col2.metric("Şu An İçeride", aktif)
-            col3.metric("Ortalama Süre (dk)", round(ort_sure,1) if not pd.isna(ort_sure) else 0)
+            col2.metric("İçeride", icerde)
+            col3.metric("Dışarıda", disarda)
+            col4.metric("Ortalama Süre (dk)", round(ort_sure,1) if not pd.isna(ort_sure) else 0)
 
         with tab2:
             st.dataframe(df, use_container_width=True)
